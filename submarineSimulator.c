@@ -5,7 +5,7 @@
 	Description:	Submarine simulation in OpenGl
 
 
-	Author:			Maxime Bouclin (Starting code provided by Stephen Brooks)
+	Author:			Maxime Bouclin
 
 *************************************************************************************/
 
@@ -14,40 +14,105 @@
 #include <GL/freeglut.h>
 #include <stdbool.h>
 #include <string.h>
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 // GLOBAL VARIABLES
 bool wireFrameRendering = false;
 bool fullScreen = false;
-int originalWidth = 750;
-int originalHeight = 500;
-int subVertexCount = 0; //Amount of vertices read in
-int subVertexSpace = 100; //Amount of space allocated for vertices
-int subNormalCount = 0; //Ammount of normals read in
-int subNormalSpace = 100; //Amount of space allocated for normals
-int subTriangleCount = 0; //Amount of triangles read in
-int subTriangleSpace = 100; //Amount of space allocated for triangles
-float (*subVertices)[3];
-float (*subNormals)[3];
-int (*subTriangles)[3][2];
+int windowWidth = 750;
+int windowHeight = 500;
+int mouseX = 750/2;
+int mouseY = 500/2;
 float t = 0;
-float zOffset = 0;
-float xOffset = 0;
-float yOffset = 0;
+float subZ = 0;
+float subX = 0;
+float subY = 0;
+float speed = 0.5; // Speed of the submarine and camera
+float camDistance = 30;
+float camYaw = 0;
+float camPitch = 0.3;
+
+//Object struct for drawing blender objects
+typedef struct {
+	float (*vertices)[3]; //List of the object's vertices (x, y, z for each vertex)
+	float (*normals)[3]; //List of the object's normals (x, y, z component for each normal)
+	int (*triangles)[3][2]; //List of the object's triangles (3 points per triangle, each point has a vertex and a normal)
+	int vertexCount;
+	int normalCount;
+	int triangleCount;
+} Object;
+
+Object submarine;
+
+//Tail of the directional light vector for the sun
+GLfloat sunPosition[] = {0, 100, 0, 0};
+
+//Lighting materials
+GLfloat darkYellowAmbient[] = {0.5, 0.5, 0, 0.5};
+GLfloat yellowDiffuse[] = {0.9, 0.8, 0, 1};
+GLfloat whiteSpecular[] = {1, 1, 1, 1};
+GLfloat zeroMaterial[] = {0, 0, 0, 0};
+GLfloat redDiffuse[] = {1, 0, 0, 1};
+GLfloat greenDiffuse[] = {0, 1, 0, 1};
+GLfloat blueDiffuse[] = {0, 0, 1, 1};
+
+//Shininess coefficients
+GLfloat noShininess = 0;
+GLfloat mediumShininess = 50;
+GLfloat highShininess = 100;
+
+/************************************************************************
+
+	Function:		drawObject
+
+	Description:	Draws an object given its struct
+
+*************************************************************************/
+void drawObject(Object object){
+	glBegin(GL_TRIANGLES);
+		for(int triangleIndx = 0; triangleIndx < object.triangleCount; triangleIndx++){
+			for(int vertex = 0; vertex < 3; vertex++){
+				// Define the normal vector for the vertex
+				int normalIndex = object.triangles[triangleIndx][vertex][1] - 1; // -1 for 1-based indices
+				glNormal3fv(object.normals[normalIndex]);
+				
+				// Define the coordinates for the vertex
+				int vertexIndex = object.triangles[triangleIndx][vertex][0] - 1; // -1 for 1-based indices
+				glVertex3fv(object.vertices[vertexIndex]);
+
+				//printf("drawing a vertex at (%f, %f, %f)\n", subVertices[vertexIndex][0], subVertices[vertexIndex][1], subVertices[vertexIndex][2]);
+			}
+		}
+	glEnd();
+}
 
 
 /************************************************************************
 
-	Function:		readInTextFile
+	Function:		readInObject
 
-	Description:	Reads in the file for the enterprise
+	Description:	Reads in the file for an obj file and return an object
+					struct with the information
 
 *************************************************************************/
 
-void readAndParseFile(const char *filename) {
-    FILE *file = fopen(filename, "r");
+Object readInObject(const char *filename) {
+	Object object = {0}; //Object struct to return
+	int objectVertexSpace = 100; //Amount of space allocated for vertices
+	int objectNormalSpace = 100; //Amount of space allocated for normals
+	int objectTriangleSpace = 100; //Amount of space allocated for triangles
 
-    char line[256];
+	//Allocate memory for arrays
+	object.vertices  = malloc(objectVertexSpace   * sizeof(float[3]));
+	object.normals   = malloc(objectNormalSpace   * sizeof(float[3]));
+	object.triangles = malloc(objectTriangleSpace * sizeof(int[3][2]));
 
+    FILE *file = fopen(filename, "r"); //Open the file and save the pointer to the file struct
+
+    //Read in file and fill the arrays
+	char line[256];
     while (fgets(line, sizeof(line), file)) { //while there are lines left
         line[strcspn(line, "\n")] = '\0'; //remove newline character at the end of the string
 
@@ -57,25 +122,25 @@ void readAndParseFile(const char *filename) {
         if (strcmp(token, "v") == 0) { //if the label is v for vertex
             for (int i = 0; i < 3; i++) { // go through each token and put the value in the corresponding place in the array
                 token = strtok(NULL, " ");
-                subVertices[subVertexCount][i] = (GLfloat)atof(token);
+                object.vertices[object.vertexCount][i] = (GLfloat)atof(token);
             }
-            subVertexCount++;
+            object.vertexCount++;
 
-			if (subVertexCount == subVertexSpace -1){
-				subVertexSpace += 100;
-				subVertices = realloc(subVertices, subVertexSpace * sizeof(float[3]));
+			if (object.vertexCount == objectVertexSpace -1){
+				objectVertexSpace += 100;
+				object.vertices = realloc(object.vertices, objectVertexSpace * sizeof(float[3]));
 			}
         }
 		else if (strcmp(token, "vn") == 0) { //if the label is vn for normal
             for (int i = 0; i < 3; i++) { // go through each token and put the value in the corresponding place in the array
                 token = strtok(NULL, " ");
-                subNormals[subNormalCount][i] = atof(token);
+                object.normals[object.normalCount][i] = atof(token);
             }
-            subNormalCount++;
+            object.normalCount++;
 
-			if (subNormalCount == subNormalSpace -1){
-				subNormalSpace += 100;
-				subNormals = realloc(subNormals, subNormalSpace * sizeof(float[3]));
+			if (object.normalCount == objectNormalSpace -1){
+				objectNormalSpace += 100;
+				object.normals = realloc(object.normals, objectNormalSpace * sizeof(float[3]));
 			}
         }
         else if (strcmp(token, "f") == 0) { //if the label is f for face (triangle)
@@ -86,74 +151,66 @@ void readAndParseFile(const char *filename) {
 				int vertexIndex, normalIndex; // for each vertex in a triangle, there is a vertex index and normal index specified
 				sscanf(token, "%d//%d", &vertexIndex, &normalIndex);
 				
-				subTriangles[subTriangleCount][i][0] = vertexIndex; //assign these indices to their place in the triangle array
-				subTriangles[subTriangleCount][i][1] = normalIndex;
+				//assign these indices to their place in the triangle array
+				object.triangles[object.triangleCount][i][0] = vertexIndex; 
+				object.triangles[object.triangleCount][i][1] = normalIndex;
             }
-            subTriangleCount++;
+            object.triangleCount++;
 
-			if (subTriangleCount == subTriangleSpace -1){
-				subTriangleSpace += 100;
-				subTriangles = realloc(subTriangles, subTriangleSpace * sizeof(int[3][2]));
+			if (object.triangleCount == objectTriangleSpace -1){
+				objectTriangleSpace += 100;
+				object.triangles = realloc(object.triangles, objectTriangleSpace * sizeof(int[3][2]));
 			}
         }
     }
-
     fclose(file);
-
-    subVertexCount = subVertexCount; //update global vars
-    subTriangleCount = subTriangleCount;
+	return object;
 }
 
 /************************************************************************
 
-	Function:		drawSphere
+	Function:		myMouse
 
-	Description:	Draws a sphere given a size, color, number of stacks and slices for graphics quality
-
-*************************************************************************/
-void drawSphere(GLfloat radius, GLint slices, GLint stacks, GLint r, GLint g, GLint b) {
-    GLUquadric* quad = gluNewQuadric();          // Create the quadric object
-    gluQuadricDrawStyle(quad, GLU_FILL);         // Solid (can also use GLU_LINE)
-    gluQuadricNormals(quad, GLU_SMOOTH);   
-	glColor3f(r, g, b);     // Smooth shading for lighting
-    gluSphere(quad, radius, slices, stacks);     // Draw the actual sphere
-    gluDeleteQuadric(quad);                      // Free memory
-}
-
-
-/************************************************************************
-
-	Function:		myIdle
-
-	Description:	Updates the animation when idle.
+	Description:	Checks for passive mouse motion and rotates the
+					camera around the submarine accordingly
 
 *************************************************************************/
-void myIdle(){
+void myMouse(int newMouseX, int newMouseY){
+	mouseX = newMouseX;
+    mouseY = newMouseY;
 
-	glutPostRedisplay();
+    float dx = (float)(mouseX - windowWidth  / 2);
+    float dy = (float)-1*(mouseY - windowHeight / 2);
+
+    // scale to some sensitivity and convert to radians
+    camYaw   = ((2*dx)/windowWidth) * M_PI;
+    camPitch = ((2*dy)/windowHeight) * (M_PI/2);
+
+    glutPostRedisplay();
 }
+
 
 /************************************************************************
 
 	Function:		myKeys
 
-	Description:	Checks for key presses for toggling orbit lines and stars
+	Description:	Checks for key presses for toggling orbit lines and 
+					stars
 
 *************************************************************************/
 void myKeys(unsigned char key, int x, int y) {
-    float speed = 0.5;
 	switch (key) {
         case 'w': // orbit lines
-			zOffset -= speed;
+			subZ -= speed;
 			break;
 		case 's': 
-			zOffset += speed;
+			subZ += speed;
 			break;
 		case 'a': // orbit lines
-			xOffset -= speed;
+			subX -= speed;
 			break;
 		case 'd': 
-			xOffset += speed;
+			subX += speed;
 			break;
         case 'u':
 			//Toggling between fireframe and filled polygons
@@ -172,8 +229,8 @@ void myKeys(unsigned char key, int x, int y) {
 				glutFullScreen();
 			} 
 			else{
-				glutReshapeWindow(originalWidth, originalHeight);
-				glutPositionWindow(1000, 50);
+				glutReshapeWindow(750, 500);
+				glutPositionWindow(500, 50);
 			}
 			break;
 		case 'q':
@@ -188,6 +245,26 @@ void myKeys(unsigned char key, int x, int y) {
 
 /************************************************************************
 
+	Function:		mySpecialKeys
+
+	Description:	Checks for key presses to move the camera and enterprise
+
+*************************************************************************/
+void mySpecialKeys(int key, int x, int y) {
+	switch (key) {
+		case GLUT_KEY_UP:
+			subY += speed;
+			break;
+		case GLUT_KEY_DOWN:
+			subY -= speed;
+			break;
+		default:
+			break;
+	}
+}
+
+/************************************************************************
+
 	Function:		myReshape
 
 	Description:	Changes the OpenGL aspect ratio to match a GLUT 
@@ -196,8 +273,11 @@ void myKeys(unsigned char key, int x, int y) {
 *************************************************************************/
 void myReshape(int newWidth, int newHeight)
 {
+	windowWidth = newWidth;
+	windowHeight = newHeight;
+	
 	// update the viewport to still be all of the window
-	glViewport (0, 0, newWidth, newHeight);
+	glViewport (0, 0, windowWidth, windowHeight);
 
 	// enter GL_PROJECTION mode so that we can change the 2D coordinates 
 	glMatrixMode (GL_PROJECTION);
@@ -206,32 +286,19 @@ void myReshape(int newWidth, int newHeight)
 	glLoadIdentity ();
 
 	// alter the 2D drawing coordinates so that it matches the shape of the window
-	gluPerspective(60.0, (float)newWidth / newHeight, 0.1, 700.0);
+	gluPerspective(60.0, (float)windowWidth / windowHeight, 0.1, 700.0);
 }
 
 /************************************************************************
 
-	Function:		initializeGL
+	Function:		myIdle
 
-	Description:	Initializes the OpenGL rendering context for display. 
+	Description:	Updates the animation when idle.
 
 *************************************************************************/
-void initializeGL(){
-	glEnable(GL_DEPTH_TEST);
-	glMatrixMode(GL_PROJECTION);
-	// set window mode to 3D projection 
-	gluPerspective(60.0, (float)originalWidth / originalHeight, 0.1, 700.0);
+void myIdle(){
 
-
-	glMatrixMode(GL_MODELVIEW);
-	gluLookAt(0, 5, 20,
-			  0, 0, 0,
-			  0, 1, 0);
-
-	glColor3f(1, 1, 1);
-
-	glClearColor(0, 0, 0, 1);
-	glLineWidth(2);
+	glutPostRedisplay();
 }
 
 /************************************************************************
@@ -247,53 +314,109 @@ void myDisplay(){
 	// --------------------  CAMERA POSITIONING -------------------- //	
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	gluLookAt(0 + xOffset, 5, 20 + zOffset,
-			0 + xOffset, 0, 0 + zOffset,
-			0, 1, 0);
+
+	// Camera position in world space, orbiting around the sub
+    float camX = subX + camDistance * cos(camPitch) * sin(camYaw);
+    float camY = subY + camDistance * sin(camPitch);
+    float camZ = subZ + camDistance * cos(camPitch) * cos(camYaw);
+
+	// Camera looks at the sub
+    gluLookAt(camX, camY, camZ,
+              subX, subY, subZ,
+              0, 1, 0);
+
+	// --------------------  SUN LIGHT POSITIONING -------------------- //	
+	glLightfv(GL_LIGHT0, GL_POSITION, sunPosition);
 
 	// --------------------  AXIS LINES -------------------- //	
+	glLineWidth(5);
 	glBegin(GL_LINES);	
 		//x axis line
+		glMaterialfv(GL_FRONT, GL_AMBIENT, zeroMaterial);
+		glMaterialfv(GL_FRONT, GL_DIFFUSE, redDiffuse);
+		glMaterialfv(GL_FRONT, GL_SPECULAR, zeroMaterial);
+		glMaterialf(GL_FRONT,  GL_SHININESS, noShininess);
+
 		glColor3f(1, 0, 0);
 		glVertex3f(-1000,0,0);
 		glVertex3f(1000,0,0);
 
 		//y axis line
+		glMaterialfv(GL_FRONT, GL_DIFFUSE, greenDiffuse);
+
 		glColor3f(0, 1, 0);
 		glVertex3f(0, -1000, 0);
 		glVertex3f(0, 1000, 0);
 		
 		//z axis line
+		glMaterialfv(GL_FRONT, GL_DIFFUSE, blueDiffuse);
+
 		glColor3f(0, 0, 1);
 		glVertex3f(0, 0, -1000);
 		glVertex3f(0, 0, 1000);
 	glEnd();
-	
 
-	//Small white sphere at the origin
-	//drawSphere(1.0f, 32, 32, 1, 1, 1);
+	// --------------------  SUBMARINE -------------------- //
+    //Matrerial
+	glMaterialfv(GL_FRONT, GL_AMBIENT, darkYellowAmbient);
+	glMaterialfv(GL_FRONT, GL_DIFFUSE, yellowDiffuse);
+	glMaterialfv(GL_FRONT, GL_SPECULAR, whiteSpecular);
+	glMaterialf(GL_FRONT,  GL_SHININESS, highShininess);
 
-	// --------------------  SUBMARINE -------------------- //	
-	glColor3f(0.96, 0.94, 0);
-	glScalef(0.1, 0.1, 0.1);
-	glBegin(GL_TRIANGLES);
-		for(int triangleIndx = 0; triangleIndx < subTriangleCount; triangleIndx++){
-			for(int vertex = 0; vertex < 3; vertex++){
-				// Define the normal vector for the vertex
-				int normalIndex = subTriangles[triangleIndx][vertex][1] - 1; // -1 for 1-based indices
-				glNormal3fv(subNormals[normalIndex]);
-				
-				// Define the coordinates for the vertex
-				int vertexIndex = subTriangles[triangleIndx][vertex][0] - 1; // -1 for 1-based indices
-				glVertex3fv(subVertices[vertexIndex]);
-
-				//printf("drawing a vertex at (%f, %f, %f)\n", subVertices[vertexIndex][0], subVertices[vertexIndex][1], subVertices[vertexIndex][2]);
-			}
-		}
-	glEnd();
-
+	//Drawing
+	glLineWidth(2);
+    glPushMatrix();
+        glTranslatef(subX, subY, subZ);     // move to sub position in world
+		glRotatef(-90, 0, 1, 0);				// rotate so that sub is parallel to the z axis
+        glScalef(0.1f, 0.1f, 0.1f);         // shrink the model
+        drawObject(submarine);
+    glPopMatrix();	
 
     glutSwapBuffers();
+}
+
+/************************************************************************
+
+	Function:		initializeGL
+
+	Description:	Initializes the OpenGL rendering context for display. 
+
+*************************************************************************/
+void initializeGL(){
+	//Define the sun color and intensity
+    GLfloat ambientSun[]	= { 0.0, 0.0, 0.0, 1.0 };  // relying on global ambient
+    GLfloat diffuseSun[]	= { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat specularSun[]	= { 1.0, 1.0, 1.0, 1.0 };
+
+	// set the global ambient light level
+    GLfloat globalAmbientLight[] = { 0.4, 0.4, 0.4, 1.0 };
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, globalAmbientLight);
+
+	// define the color and intensity for the sun
+    glLightfv(GL_LIGHT0, GL_AMBIENT,   ambientSun);
+    glLightfv(GL_LIGHT0, GL_SPECULAR,  diffuseSun);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE,   specularSun);
+
+    glEnable(GL_LIGHTING); // enable lighting 
+
+    glEnable(GL_LIGHT0); // enable light 0 / sun
+
+	glEnable(GL_DEPTH_TEST); // enable z buffer
+	glEnable(GL_NORMALIZE); // make sure the normals are unit vectors
+	
+	// set window mode to 3D projection 
+	glMatrixMode(GL_PROJECTION);
+	gluPerspective(60.0, (float)windowWidth / windowHeight, 0.1, 700.0);
+
+	// set up camera position
+	glMatrixMode(GL_MODELVIEW);
+	gluLookAt(0, 5, 20,
+			  0, 0, 0,
+			  0, 1, 0);
+
+	glClearColor(0, 0, 0, 1);
+	glLineWidth(5);
+
 }
 
 /************************************************************************
@@ -310,9 +433,9 @@ int main(int argc, char** argv){
 	// set display mode
 	glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH); 
 	// set window size
-	glutInitWindowSize(originalWidth, originalHeight);     
+	glutInitWindowSize(windowWidth, windowHeight);     
 	// set window position on screen
-	glutInitWindowPosition(1000, 150); 
+	glutInitWindowPosition(500, 50); 
 	// open the screen window
 	glutCreateWindow(argv[0]);
 	// register redraw function
@@ -325,15 +448,12 @@ int main(int argc, char** argv){
 	glutIdleFunc(myIdle);
 	// register keyboard function
 	glutKeyboardFunc(myKeys);
-	
-	// Initialize arrays for submarine data
-	subVertices  = calloc(subVertexSpace,  sizeof *subVertices);
-	subNormals   = calloc(subNormalSpace,  sizeof *subNormals);
-	subTriangles = calloc(subTriangleSpace, sizeof *subTriangles);
-
+	// register special keys function
+	glutSpecialFunc(mySpecialKeys);
+	// register mouse function
+	glutPassiveMotionFunc(myMouse);
 	// Read in submarine values
-	readAndParseFile("support_files/submarine.obj");
-
+	submarine = readInObject("support_files/submarine.obj");
 	// go into a perpetual loop
 	glutMainLoop(); 
 }
