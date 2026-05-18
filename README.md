@@ -4,6 +4,8 @@ A 3D submarine simulation written in C using OpenGL and GLUT.
 
 ## Overview
 
+<img width="1420" height="773" alt="Screenshot 2026-05-17 at 9 41 49 PM" src="https://github.com/user-attachments/assets/3bf90487-3cf5-47a9-a30a-f97525d7f9fc" />
+
 This project is a real-time 3D graphics simulation that renders a submarine navigating an underwater environment. The simulator was developed to explore low-level computer graphics programming concepts including transformations, lighting, textures, camera movement, and interactive rendering.
 
 The application uses OpenGL and GLUT to render a dynamic 3D scene with keyboard and mouse controls for user interaction.
