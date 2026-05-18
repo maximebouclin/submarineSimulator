@@ -57,11 +57,11 @@ The application uses OpenGL and GLUT to render a dynamic 3D scene with keyboard 
 
 ### Build Example (Linux)
 
-bash gcc submarineSimulator.c -o submarineSimulator -lGL -lGLU -lglut -lm 
+`gcc submarineSimulator.c -o submarineSimulator -lGL -lGLU -lglut -lm`
 
 ### Run
 
-bash ./submarineSimulator 
+`./submarineSimulator`
 
 ---
 
